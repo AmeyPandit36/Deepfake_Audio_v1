@@ -167,7 +167,7 @@ elif choice == "Audio Detection":
     
     # uploaded_file = st.file_uploader("Choose a wav file", type="wav")
         # Change this line:
-        uploaded_file = st.file_uploader("Choose an audio file", type=["wav", "mp3", "ogg", "m4a"])
+    uploaded_file = st.file_uploader("Choose an audio file", type=["wav", "mp3", "ogg", "m4a"])
     
     if uploaded_file is not None:
         st.audio(uploaded_file, format='audio/wav')
