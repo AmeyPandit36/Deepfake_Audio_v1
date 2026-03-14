@@ -78,7 +78,7 @@ elif choice == "Audio Detection":
                 # Load Model
                 model = DeepfakeAudioDetector()
                 # Ensure the .pth file is in your GitHub repo
-                model.load_state_dict(torch.load("deepfake_audio_model.pth", map_location=torch.device('cpu')))
+                model.load_state_dict(torch.load("deepfake_audio_model.pth", map_location='cpu'))
                 model.eval()
                 
                 # Predict
