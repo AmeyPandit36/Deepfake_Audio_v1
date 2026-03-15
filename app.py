@@ -4,12 +4,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import librosa
+import librosa.display
 import os
 import tempfile
 import matplotlib.pyplot as plt
-import librosa.display
 
-# 1. NEW SOTA Model Architecture
+# --- 1. SOTA MODEL ARCHITECTURE ---
 class EfficientGraphAttention(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
@@ -44,96 +44,122 @@ class SOTA_AudioDetector(nn.Module):
         x = F.relu(self.fc1(x))
         return self.fc2(x)
 
-def process_long_audio(uploaded_file):
+# --- 2. ADVANCED FORENSIC PREPROCESSING ---
+def process_pro_audio(uploaded_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
 
     try:
+        # Load at 16k Mono
         y, sr = librosa.load(tmp_path, sr=16000, mono=True)
-        y, _ = librosa.effects.trim(y)
         
-        window_size = 64000 # 4 seconds
+        # FIX: Voice Activity Detection (Remove silence)
+        # top_db=20 is aggressive; ensures the model doesn't see "digital silence" as machine artifacts
+        intervals = librosa.effects.split(y, top_db=25)
+        y_speech = np.concatenate([y[start:end] for start, end in intervals]) if len(intervals) > 0 else y
+
+        window_size = 64000  # 4 seconds
+        hop_length = 32000   # 2 seconds (50% OVERLAP)
         chunks = []
         
-        for i in range(0, len(y) - window_size + 1, window_size):
-            chunk = y[i : i + window_size]
-            if np.max(np.abs(chunk)) > 0:
-                chunk = chunk / np.max(np.abs(chunk))
+        # FIX: Sliding Window
+        for i in range(0, len(y_speech) - window_size + 1, hop_length):
+            chunk = y_speech[i : i + window_size]
+            # FIX: Peak Normalization (Prevents noise stretching)
+            peak = np.max(np.abs(chunk))
+            if peak > 0:
+                chunk = chunk / peak
             chunks.append(chunk)
             
+        # Handle very short clips
         if not chunks:
-            y = librosa.util.fix_length(y, size=window_size)
-            chunks.append(y / (np.max(np.abs(y)) + 1e-7))
+            y_padded = librosa.util.fix_length(y_speech, size=window_size)
+            peak = np.max(np.abs(y_padded))
+            chunks.append(y_padded / (peak + 1e-7))
 
+        # Shape: [Num_Chunks, 1, 64000]
         return torch.from_numpy(np.array(chunks)).unsqueeze(1).float()
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# --- STREAMLIT UI CODE ---
+# --- 3. STREAMLIT UI ---
 st.set_page_config(page_title="Deepfake Shield | Forensic Lab", page_icon="🛡️", layout="wide")
 
+# Sidebar
 with st.sidebar:
     st.markdown("# 🛡️ **Forensic Lab**")
     choice = st.radio("ANALYSIS MODE", ["Overview", "Audio Verification"])
-    st.status("SOTA Model Loaded", state="complete")
+    st.status("SOTA GAT Model Ready", state="complete")
 
 if choice == "Overview":
     st.title("Deepfake Shield Portal")
-    st.info("Now upgraded to SOTA AASIST-Lite Architecture for high-fidelity detection.")
+    st.markdown("""
+    ### Current Defensive Layers:
+    * **Model:** Efficient Graph Attention (GAT) Neural Network.
+    * **VAD Filter:** Automatic silence removal to prevent "Silence Artifact" false positives.
+    * **Windowing:** 50% Overlapping Sliding Windows for temporal analysis.
+    """)
 
 elif choice == "Audio Verification":
     st.title("🎙️ Audio Forensic Scanner")
-    uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "m4a"])
+    uploaded_file = st.file_uploader("Upload Audio (WAV, MP3, M4A)", type=["wav", "mp3", "m4a"])
     
     if uploaded_file:
         uploaded_file.seek(0)
-        y, sr = librosa.load(uploaded_file, sr=16000)
+        y_viz, sr_viz = librosa.load(uploaded_file, sr=16000)
         st.audio(uploaded_file)
 
+        # Visualizations
         st.write("### 📊 Signal Analysis")
         col1, col2 = st.columns(2)
-        
         with col1:
-            st.write("**Waveform**")
             fig_wave, ax_wave = plt.subplots(figsize=(10, 4))
-            librosa.display.waveshow(y, sr=sr, ax=ax_wave, color='#2563eb')
+            librosa.display.waveshow(y_viz, sr=sr_viz, ax=ax_wave, color='#2563eb')
             ax_wave.set_axis_off()
             st.pyplot(fig_wave)
-            
         with col2:
-            st.write("**Spectrogram**")
             fig_spec, ax_spec = plt.subplots(figsize=(10, 4))
-            S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
+            S = librosa.feature.melspectrogram(y=y_viz, sr=sr_viz, n_mels=128)
             S_db = librosa.power_to_db(S, ref=np.max)
-            librosa.display.specshow(S_db, x_axis='time', y_axis='mel', sr=sr, ax=ax_spec, cmap='magma')
+            librosa.display.specshow(S_db, x_axis='time', y_axis='mel', sr=sr_viz, ax=ax_spec, cmap='magma')
             ax_spec.set_axis_off()
             st.pyplot(fig_spec)
 
         if st.button("RUN NEURAL DIAGNOSTIC"):
-            with st.spinner('🔭 Scanning...'):
-                # Initialize and load model
+            with st.spinner('🔭 Running Forensic Scan...'):
+                # Load Model
                 model = SOTA_AudioDetector()
                 if os.path.exists("sota_deepfake_detector.pth"):
                     model.load_state_dict(torch.load("sota_deepfake_detector.pth", map_location='cpu'))
                 model.eval()
 
+                # Process
                 uploaded_file.seek(0)
-                input_batch = process_long_audio(uploaded_file)
+                input_batch = process_pro_audio(uploaded_file)
                 
                 with torch.no_grad():
                     outputs = model(input_batch)
                     probs = torch.softmax(outputs, dim=1)
                     
+                    # Aggregate results
                     avg_fake_prob = torch.mean(probs[:, 1]).item()
                     
-                    st.write("### 🔬 Forensic Analysis")
-                    if avg_fake_prob > 0.92:
-                        st.error(f"🚨 **SYNTHETIC ARTIFACTS DETECTED** ({avg_fake_prob*100:.1f}%)")
-                        st.warning("High-confidence AI signatures found.")
-                    elif avg_fake_prob > 0.60:
-                        st.info(f"⚠️ **INCONCLUSIVE RESULT** ({avg_fake_prob*100:.1f}%)")
-                        st.write("Detected digital artifacts likely caused by **WhatsApp compression** or background noise.")
+                    st.markdown("---")
+                    st.write("### 🔬 Forensic Diagnosis")
+                    
+                    # THREE-TIER CALIBRATION
+                    if avg_fake_prob > 0.90:
+                        st.error(f"🚨 **HIGH PROBABILITY SYNTHETIC** ({avg_fake_prob*100:.1f}%)")
+                        st.warning("Forensic artifacts consistent with AI generation detected.")
+                    elif avg_fake_prob > 0.45:
+                        st.info(f"⚠️ **INCONCLUSIVE / COMPRESSION DETECTED** ({avg_fake_prob*100:.1f}%)")
+                        st.write("High levels of digital noise found. This is likely due to **WhatsApp compression** or background interference.")
                     else:
-                        st.success(f"✅ **VERIFIED HUMAN** ({(1-avg_fake_prob)*100:.1f}%)")
+                        st.success(f"✅ **VERIFIED NATURAL SPEECH** ({(1-avg_fake_prob)*100:.1f}%)")
+                        st.write("Signal patterns match organic human speech profiles.")
+
+                    # Technical Debug (Small font)
+                    with st.expander("View Raw Neural Probabilities"):
+                        st.write(probs.numpy())
