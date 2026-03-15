@@ -82,7 +82,32 @@ elif choice == "Audio Verification":
     uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "m4a"])
     
     if uploaded_file:
+
+        # Load audio for visualization (separate from model processing)
+        y, sr = librosa.load(uploaded_file, sr=16000)
+        
         st.audio(uploaded_file)
+
+        # --- NEW VISUALIZATION SECTION ---
+        st.write("### 📊 Signal Analysis")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Waveform** (Amplitude over Time)")
+            fig_wave, ax_wave = plt.subplots(figsize=(10, 4))
+            librosa.display.waveshow(y, sr=sr, ax=ax_wave, color='#2563eb')
+            ax_wave.set_axis_off() # Clean look
+            st.pyplot(fig_wave)
+            
+        with col2:
+            st.write("**Spectrogram** (Frequency over Time)")
+            fig_spec, ax_spec = plt.subplots(figsize=(10, 4))
+            S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
+            S_db = librosa.power_to_db(S, ref=np.max)
+            img = librosa.display.specshow(S_db, x_axis='time', y_axis='mel', sr=sr, ax=ax_spec, cmap='magma')
+            ax_spec.set_axis_off() # Clean look
+            st.pyplot(fig_spec)
+        # ---------------------------------
         
         if st.button("RUN NEURAL DIAGNOSTIC"):
             with st.spinner('Performing Deep Waveform Analysis...'):
