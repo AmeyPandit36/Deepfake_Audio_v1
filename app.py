@@ -65,32 +65,34 @@ class SOTA_AudioDetector(nn.Module):
 #             os.remove(tmp_path)
 
 def process_long_audio(uploaded_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
 
     try:
-        y, sr = librosa.load(tmp_path, sr=16000)
+        # 1. Force 16k mono (Exact training specs)
+        y, sr = librosa.load(tmp_path, sr=16000, mono=True)
         
-        # Calculate how many 4-second chunks we have
-        window_size = 4 * 16000
-        total_samples = len(y)
+        # 2. Trim silence (Silence often confuses deepfake models)
+        y, _ = librosa.effects.trim(y)
         
+        window_size = 64000 # 4 seconds
         chunks = []
-        # We slide the window by 4 seconds each time (no overlap for speed)
-        for i in range(0, total_samples - window_size + 1, window_size):
+        
+        # 3. Create Chunks
+        for i in range(0, len(y) - window_size + 1, window_size):
             chunk = y[i : i + window_size]
-            # Normalize each chunk
-            chunk = (chunk - np.mean(chunk)) / (np.std(chunk) + 1e-7)
+            
+            # 4. Standard Peak Normalization (More stable than Z-score for some models)
+            if np.max(np.abs(chunk)) > 0:
+                chunk = chunk / np.max(np.abs(chunk))
+                
             chunks.append(chunk)
             
-        # If the file is shorter than 4 seconds, just pad it
         if not chunks:
-            y_padded = librosa.util.fix_length(y, size=window_size)
-            y_norm = (y_padded - np.mean(y_padded)) / (np.std(y_padded) + 1e-7)
-            chunks.append(y_norm)
+            y = librosa.util.fix_length(y, size=window_size)
+            chunks.append(y / (np.max(np.abs(y)) + 1e-7))
 
-        # Convert list of chunks into a single Batch Tensor: [Num_Chunks, 1, 64000]
         return torch.from_numpy(np.array(chunks)).unsqueeze(1).float()
     finally:
         if os.path.exists(tmp_path):
