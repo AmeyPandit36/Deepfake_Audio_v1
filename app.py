@@ -164,6 +164,14 @@ elif choice == "Audio Verification":
                 with torch.no_grad():
                     outputs = model(input_batch)
                     probs = torch.softmax(outputs, dim=1)
+
+                    # --- DEBUG SECTION START ---
+                    st.write("### 🧪 Debugging Model Logic")
+                    # We look at the first 4-second chunk (index 0)
+                    st.write(f"Raw Output Scores: {outputs[0].tolist()}") 
+                    st.write(f"Human Probability: **{probs[0][0]:.4f}**")
+                    st.write(f"Fake Probability: **{probs[0][1]:.4f}**")
+                    # --- DEBUG SECTION END ---
                     
                     avg_probs = torch.mean(probs, dim=0)
                     prediction = torch.argmax(avg_probs).item()
