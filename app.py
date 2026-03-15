@@ -9,7 +9,7 @@ import tempfile
 import matplotlib.pyplot as plt
 import librosa.display
 
-# 1. NEW SOTA Model Architecture (Matches Cell 4 of your notebook)
+# 1. NEW SOTA Model Architecture
 class EfficientGraphAttention(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
@@ -44,49 +44,22 @@ class SOTA_AudioDetector(nn.Module):
         x = F.relu(self.fc1(x))
         return self.fc2(x)
 
-# 2. NEW Preprocessing Logic (Raw Waveform)
-# def process_audio(uploaded_file):
-#     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
-#         tmp_file.write(uploaded_file.getvalue())
-#         tmp_path = tmp_file.name
-
-#     try:
-#         # Load raw audio at 16kHz
-#         y, sr = librosa.load(tmp_path, sr=16000)
-#         # Fix length to 4 seconds (64,000 samples)
-#         y = librosa.util.fix_length(y, size=64000)
-#         # Z-score Normalization
-#         y = (y - np.mean(y)) / (np.std(y) + 1e-7)
-        
-#         # Return as tensor with shape [1, 1, 64000]
-#         return torch.from_numpy(y).unsqueeze(0).unsqueeze(0).float()
-#     finally:
-#         if os.path.exists(tmp_path):
-#             os.remove(tmp_path)
-
 def process_long_audio(uploaded_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
 
     try:
-        # 1. Force 16k mono (Exact training specs)
         y, sr = librosa.load(tmp_path, sr=16000, mono=True)
-        
-        # 2. Trim silence (Silence often confuses deepfake models)
         y, _ = librosa.effects.trim(y)
         
         window_size = 64000 # 4 seconds
         chunks = []
         
-        # 3. Create Chunks
         for i in range(0, len(y) - window_size + 1, window_size):
             chunk = y[i : i + window_size]
-            
-            # 4. Standard Peak Normalization (More stable than Z-score for some models)
             if np.max(np.abs(chunk)) > 0:
                 chunk = chunk / np.max(np.abs(chunk))
-                
             chunks.append(chunk)
             
         if not chunks:
@@ -101,9 +74,6 @@ def process_long_audio(uploaded_file):
 # --- STREAMLIT UI CODE ---
 st.set_page_config(page_title="Deepfake Shield | Forensic Lab", page_icon="🛡️", layout="wide")
 
-# (Keep your existing CSS here...)
-
-# Sidebar Navigation
 with st.sidebar:
     st.markdown("# 🛡️ **Forensic Lab**")
     choice = st.radio("ANALYSIS MODE", ["Overview", "Audio Verification"])
@@ -118,13 +88,8 @@ elif choice == "Audio Verification":
     uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "m4a"])
     
     if uploaded_file:
-        # --- FIX 1: Reset buffer to ensure we can read the file multiple times ---
         uploaded_file.seek(0)
-        
-        # Load audio for visualization (separate from model processing)
-        # Using a lower sr for visualization saves memory
         y, sr = librosa.load(uploaded_file, sr=16000)
-
         st.audio(uploaded_file)
 
         st.write("### 📊 Signal Analysis")
@@ -146,43 +111,29 @@ elif choice == "Audio Verification":
             ax_spec.set_axis_off()
             st.pyplot(fig_spec)
 
-        # --- RUN DIAGNOSTIC SECTION ---
         if st.button("RUN NEURAL DIAGNOSTIC"):
-            with st.spinner('🔭 Scanning entire file piece-by-piece...'):
+            with st.spinner('🔭 Scanning...'):
+                # Initialize and load model
                 model = SOTA_AudioDetector()
-                model.load_state_dict(torch.load("sota_deepfake_detector.pth", map_location='cpu'))
+                if os.path.exists("sota_deepfake_detector.pth"):
+                    model.load_state_dict(torch.load("sota_deepfake_detector.pth", map_location='cpu'))
                 model.eval()
-                
-                # --- FIX 2: Reset buffer AGAIN before the diagnostic function ---
-                uploaded_file.seek(0)
-                input_batch = process_long_audio(uploaded_file) 
-                
-                # LIMIT CHECK: If file is too long (e.g., > 50 chunks), 
-                # we process only the first 50 to prevent memory crashes
-                if len(input_batch) > 50:
-                    st.warning(f"Note: This is a very long file. To save memory, we are analyzing the first 200 seconds.")
-                    input_batch = input_batch[:50]
 
+                uploaded_file.seek(0)
+                input_batch = process_long_audio(uploaded_file)
+                
                 with torch.no_grad():
                     outputs = model(input_batch)
                     probs = torch.softmax(outputs, dim=1)
-
-                    # --- DEBUG SECTION START ---
-                    st.write("### 🧪 Debugging Model Logic")
-                    # We look at the first 4-second chunk (index 0)
-                    st.write(f"Raw Output Scores: {outputs[0].tolist()}") 
-                    st.write(f"Human Probability: **{probs[0][0]:.4f}**")
-                    st.write(f"Fake Probability: **{probs[0][1]:.4f}**")
-                    # --- DEBUG SECTION END ---
                     
-                    avg_probs = torch.mean(probs, dim=0)
-                    prediction = torch.argmax(avg_probs).item()
-                    confidence = avg_probs[prediction].item()
-                
-                st.markdown("---")
-                if prediction == 0:
-                    st.success(f"### ✅ VERIFIED HUMAN")
-                    st.info(f"Analyzed {len(input_batch)} segments. Avg Probability: **{confidence*100:.1f}**%")
-                else:
-                    st.error(f"### 🚨 SYNTHETIC ARTIFACTS DETECTED")
-                    st.warning(f"AI signatures found across {len(input_batch)} segments. Avg Probability: **{confidence*100:.1f}**%")
+                    avg_fake_prob = torch.mean(probs[:, 1]).item()
+                    
+                    st.write("### 🔬 Forensic Analysis")
+                    if avg_fake_prob > 0.92:
+                        st.error(f"🚨 **SYNTHETIC ARTIFACTS DETECTED** ({avg_fake_prob*100:.1f}%)")
+                        st.warning("High-confidence AI signatures found.")
+                    elif avg_fake_prob > 0.60:
+                        st.info(f"⚠️ **INCONCLUSIVE RESULT** ({avg_fake_prob*100:.1f}%)")
+                        st.write("Detected digital artifacts likely caused by **WhatsApp compression** or background noise.")
+                    else:
+                        st.success(f"✅ **VERIFIED HUMAN** ({(1-avg_fake_prob)*100:.1f}%)")
