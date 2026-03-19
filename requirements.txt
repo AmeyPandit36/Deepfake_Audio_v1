@@ -6,3 +6,4 @@ streamlit
 soundfile
 matplotlib
 pillow
+opencv-python-headless
